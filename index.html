@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PDF Booklet Maker for Non-Duplex Printers</title>
+    
+    <!-- React & ReactDOM -->
+    <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+    <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+    
+    <!-- Babel for JSX -->
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- PDF-Lib -->
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f3f4f6;
+        }
+        .drag-active {
+            border-color: #3b82f6;
+            background-color: #eff6ff;
+        }
+    </style>
+</head>
+<body>
+
+<div id="root"></div>
+
+<script type="text/babel">
+    const { useState, useEffect, useCallback } = React;
+
+    // --- Inline SVG Icons to prevent DOM conflicts ---
+    const IconUpload = () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-10 h-10 mb-3 text-gray-400">
+            <path d="M4 14.899A7 7 0 1 1 15.71 8h1.79a4.5 4.5 0 0 1 2.5 8.242" />
+            <path d="M12 12v9" />
+            <path d="m16 16-4-4-4 4" />
+        </svg>
+    );
+
+    const IconFile = () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5 text-blue-500">
+            <path d="M14.5 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7.5L14.5 2z" />
+            <polyline points="14 2 14 8 20 8" />
+        </svg>
+    );
+
+    const IconTrash = () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+            <path d="M3 6h18" />
+            <path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6" />
+            <path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2" />
+        </svg>
+    );
+
+    const IconArrowUp = () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+            <path d="m18 15-6-6-6 6" />
+        </svg>
+    );
+
+    const IconArrowDown = () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4">
+            <path d="m6 9 6 6 6-6" />
+        </svg>
+    );
+
+    const IconLoader = () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-5 h-5 animate-spin mr-2">
+            <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+        </svg>
+    );
+
+    const IconDownload = () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 mr-2">
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" x2="12" y1="15" y2="3" />
+        </svg>
+    );
+
+    const IconCheck = () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6">
+            <polyline points="20 6 9 17 4 12" />
+        </svg>
+    );
+
+    const IconPrinter = () => (
+        <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 mr-2">
+            <polyline points="6 9 6 2 18 2 18 9" />
+            <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2" />
+            <rect width="12" height="8" x="6" y="14" />
+        </svg>
+    );
+
+    function App() {
+        const [files, setFiles] = useState([]);
+        const [isDragging, setIsDragging] = useState(false);
+        const [isProcessing, setIsProcessing] = useState(false);
+        const [error, setError] = useState(null);
+        const [generatedDocs, setGeneratedDocs] = useState(null);
+
+        const handleDragOver = (e) => {
+            e.preventDefault();
+            setIsDragging(true);
+        };
+
+        const handleDragLeave = (e) => {
+            e.preventDefault();
+            setIsDragging(false);
+        };
+
+        const handleDrop = (e) => {
+            e.preventDefault();
+            setIsDragging(false);
+            const droppedFiles = Array.from(e.dataTransfer.files).filter(f => f.type === "application/pdf");
+            if (droppedFiles.length > 0) {
+                setFiles(prev => [...prev, ...droppedFiles]);
+                setError(null);
+                setGeneratedDocs(null); // Reset previous results
+            } else {
+                setError("Please drop PDF files only.");
+            }
+        };
+
+        const handleFileInput = (e) => {
+            const selectedFiles = Array.from(e.target.files).filter(f => f.type === "application/pdf");
+            if (selectedFiles.length > 0) {
+                setFiles(prev => [...prev, ...selectedFiles]);
+                setError(null);
+                setGeneratedDocs(null);
+            }
+        };
+
+        const removeFile = (index) => {
+            setFiles(prev => prev.filter((_, i) => i !== index));
+            setGeneratedDocs(null);
+        };
+
+        const moveFile = (index, direction) => {
+            const newFiles = [...files];
+            if (direction === -1 && index > 0) {
+                [newFiles[index], newFiles[index - 1]] = [newFiles[index - 1], newFiles[index]];
+            } else if (direction === 1 && index < newFiles.length - 1) {
+                [newFiles[index], newFiles[index + 1]] = [newFiles[index + 1], newFiles[index]];
+            }
+            setFiles(newFiles);
+            setGeneratedDocs(null);
+        };
+
+        const generateBooklet = async () => {
+            if (files.length === 0) return;
+            setIsProcessing(true);
+            setError(null);
+
+            try {
+                if (typeof PDFLib === 'undefined') {
+                    throw new Error("PDF Library failed to load. Please refresh the page.");
+                }
+                const { PDFDocument, rgb } = PDFLib;
+
+                // 1. Merge all input PDFs into a single list of pages
+                const mergedPdf = await PDFDocument.create();
+                
+                // Helper to load files
+                const readFile = (file) => {
+                    return new Promise((resolve, reject) => {
+                        const reader = new FileReader();
+                        reader.onload = () => resolve(new Uint8Array(reader.result));
+                        reader.onerror = reject;
+                        reader.readAsArrayBuffer(file);
+                    });
+                };
+
+                // Copy pages from source files
+                for (const file of files) {
+                    const fileBytes = await readFile(file);
+                    const pdf = await PDFDocument.load(fileBytes);
+                    const copiedPages = await mergedPdf.copyPages(pdf, pdf.getPageIndices());
+                    copiedPages.forEach((page) => mergedPdf.addPage(page));
+                }
+
+                // Get actual count of content pages
+                const actualPageCount = mergedPdf.getPageCount();
+                
+                // 2. Calculate padding mathematically instead of adding physical blank pages
+                // This prevents "Can't embed page with missing Contents" error
+                const pagesNeeded = actualPageCount % 4 === 0 ? 0 : 4 - (actualPageCount % 4);
+                const finalPageCount = actualPageCount + pagesNeeded;
+                const totalSheets = finalPageCount / 4;
+
+                // 3. Create two new documents: Fronts and Backs
+                const frontsDoc = await PDFDocument.create();
+                const backsDoc = await PDFDocument.create();
+
+                // 4. Imposition Logic
+                const pageWidth = 841.89; // A4 Landscape
+                const pageHeight = 595.28;
+                
+                // Optimization: Save merged PDF to bytes first to allow clean embedding
+                const mergedPdfBytes = await mergedPdf.save();
+                const mergedPdfReloaded = await PDFDocument.load(mergedPdfBytes);
+
+                const processImposition = async (targetDoc, isFront) => {
+                    for (let i = 0; i < totalSheets; i++) {
+                        const newPage = targetDoc.addPage([pageWidth, pageHeight]);
+                        
+                        // Calculate which source pages go here
+                        let leftPageIndex, rightPageIndex;
+                        
+                        if (isFront) {
+                            // Front of sheet: Left = Last-ish, Right = First-ish
+                            leftPageIndex = finalPageCount - 1 - (2 * i);
+                            rightPageIndex = 0 + (2 * i);
+                        } else {
+                            // Back of sheet: Left = First+1, Right = Last-1
+                            leftPageIndex = 0 + (2 * i) + 1;
+                            rightPageIndex = finalPageCount - 1 - (2 * i) - 1;
+                        }
+
+                        // Drawing helper
+                        const halfWidth = pageWidth / 2;
+                        const padding = 20;
+                        const drawAreaW = halfWidth - (padding * 2);
+                        const drawAreaH = pageHeight - (padding * 2);
+
+                        const drawContent = (embeddedPage, xOffset) => {
+                            const { width: srcW, height: srcH } = embeddedPage;
+                            const scale = Math.min(drawAreaW / srcW, drawAreaH / srcH);
+                            
+                            const drawnW = srcW * scale;
+                            const drawnH = srcH * scale;
+
+                            // Center in the half-page slot
+                            const x = xOffset + (halfWidth - drawnW) / 2;
+                            const y = (pageHeight - drawnH) / 2;
+
+                            newPage.drawPage(embeddedPage, {
+                                x,
+                                y,
+                                width: drawnW,
+                                height: drawnH,
+                            });
+                        };
+
+                        // Process Left Half
+                        if (leftPageIndex < actualPageCount) {
+                            const [embeddedLeft] = await targetDoc.embedPdf(mergedPdfReloaded, [leftPageIndex]);
+                            drawContent(embeddedLeft, 0);
+                        }
+
+                        // Process Right Half
+                        if (rightPageIndex < actualPageCount) {
+                             const [embeddedRight] = await targetDoc.embedPdf(mergedPdfReloaded, [rightPageIndex]);
+                             drawContent(embeddedRight, halfWidth);
+                        }
+
+                        // --- Add Fold and Staple Marks (Only on First Sheet of Fronts) ---
+                        if (isFront && i === 0) {
+                            const centerX = pageWidth / 2;
+                            
+                            // 1. Fold Line (Dashed, Gray)
+                            newPage.drawLine({
+                                start: { x: centerX, y: 0 },
+                                end: { x: centerX, y: pageHeight },
+                                thickness: 1,
+                                color: rgb(0.7, 0.7, 0.7), // Light Gray
+                                dashArray: [5, 5]
+                            });
+
+                            // 2. Staple Marks (Crosshairs at 1/3 and 2/3 height)
+                            const stapleY1 = pageHeight / 3;
+                            const stapleY2 = (pageHeight / 3) * 2;
+                            const markSize = 5; // Half-length of the crosshair
+
+                            // Staple 1
+                            newPage.drawLine({
+                                start: { x: centerX - markSize, y: stapleY1 },
+                                end: { x: centerX + markSize, y: stapleY1 },
+                                thickness: 1.5,
+                                color: rgb(0.2, 0.2, 0.2), // Dark Gray
+                            });
+
+                            // Staple 2
+                            newPage.drawLine({
+                                start: { x: centerX - markSize, y: stapleY2 },
+                                end: { x: centerX + markSize, y: stapleY2 },
+                                thickness: 1.5,
+                                color: rgb(0.2, 0.2, 0.2), // Dark Gray
+                            });
+                        }
+                    }
+                };
+
+                await processImposition(frontsDoc, true);
+                await processImposition(backsDoc, false);
+
+                // Serialize
+                const frontsBytes = await frontsDoc.save();
+                const backsBytes = await backsDoc.save();
+
+                // Create Blobs
+                const frontsBlob = new Blob([frontsBytes], { type: 'application/pdf' });
+                const backsBlob = new Blob([backsBytes], { type: 'application/pdf' });
+
+                setGeneratedDocs({
+                    frontsUrl: URL.createObjectURL(frontsBlob),
+                    backsUrl: URL.createObjectURL(backsBlob),
+                    sheetCount: totalSheets,
+                    originalPages: actualPageCount,
+                    finalPages: finalPageCount
+                });
+
+            } catch (err) {
+                console.error(err);
+                setError("Error processing PDF: " + err.message);
+            } finally {
+                setIsProcessing(false);
+            }
+        };
+
+        return (
+            <div className="min-h-screen p-8 flex flex-col items-center">
+                <div className="max-w-3xl w-full bg-white rounded-xl shadow-lg overflow-hidden">
+                    
+                    {/* Header */}
+                    <div className="bg-slate-800 p-6 text-white text-center">
+                        <h1 className="text-2xl font-bold mb-2">Booklet Maker</h1>
+                        <p className="text-slate-300 text-sm">Merge PDFs and prepare them for printing on non-duplex printers.</p>
+                    </div>
+
+                    <div className="p-8">
+                        {/* Drop Zone */}
+                        {!generatedDocs && (
+                            <div 
+                                onDragOver={handleDragOver}
+                                onDragLeave={handleDragLeave}
+                                onDrop={handleDrop}
+                                className={`border-2 border-dashed rounded-xl p-10 text-center transition-colors cursor-pointer
+                                    ${isDragging ? 'drag-active' : 'border-gray-300 hover:border-blue-400'}`}
+                                onClick={() => document.getElementById('fileInput').click()}
+                            >
+                                <input 
+                                    type="file" 
+                                    id="fileInput" 
+                                    multiple 
+                                    accept=".pdf" 
+                                    className="hidden" 
+                                    onChange={handleFileInput} 
+                                />
+                                <div className="flex flex-col items-center justify-center">
+                                    <IconUpload />
+                                    <p className="text-lg font-medium text-gray-700">
+                                        Drag & Drop PDFs here
+                                    </p>
+                                    <p className="text-sm text-gray-500 mt-1">or click to browse</p>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* File List */}
+                        {files.length > 0 && !generatedDocs && (
+                            <div className="mt-8">
+                                <h3 className="text-sm font-semibold text-gray-500 uppercase tracking-wider mb-3">
+                                    Files to Merge ({files.length})
+                                </h3>
+                                <div className="space-y-2">
+                                    {files.map((file, idx) => (
+                                        <div key={idx} className="flex items-center justify-between bg-gray-50 p-3 rounded-lg border border-gray-100 group">
+                                            <div className="flex items-center overflow-hidden">
+                                                <div className="flex-shrink-0 mr-3">
+                                                    <IconFile />
+                                                </div>
+                                                <span className="text-sm font-medium text-gray-700 truncate max-w-xs">{file.name}</span>
+                                                <span className="ml-2 text-xs text-gray-400">({(file.size / 1024 / 1024).toFixed(2)} MB)</span>
+                                            </div>
+                                            <div className="flex items-center space-x-2">
+                                                <button 
+                                                    onClick={() => moveFile(idx, -1)} 
+                                                    disabled={idx === 0}
+                                                    className="p-1 hover:bg-gray-200 rounded disabled:opacity-30 text-gray-600"
+                                                >
+                                                    <IconArrowUp />
+                                                </button>
+                                                <button 
+                                                    onClick={() => moveFile(idx, 1)} 
+                                                    disabled={idx === files.length - 1}
+                                                    className="p-1 hover:bg-gray-200 rounded disabled:opacity-30 text-gray-600"
+                                                >
+                                                    <IconArrowDown />
+                                                </button>
+                                                <button 
+                                                    onClick={() => removeFile(idx)}
+                                                    className="p-1 hover:bg-red-100 text-red-500 rounded"
+                                                >
+                                                    <IconTrash />
+                                                </button>
+                                            </div>
+                                        </div>
+                                    ))}
+                                </div>
+
+                                <div className="mt-6 flex justify-end">
+                                    <button 
+                                        onClick={generateBooklet}
+                                        disabled={isProcessing}
+                                        className="bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 px-6 rounded-lg shadow transition-colors flex items-center disabled:opacity-50"
+                                    >
+                                        {isProcessing ? (
+                                            <>
+                                                <IconLoader /> Processing...
+                                            </>
+                                        ) : (
+                                            "Generate Booklet Files"
+                                        )}
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+
+                        {/* Error Message */}
+                        {error && (
+                            <div className="mt-4 p-4 bg-red-50 text-red-700 rounded-lg border border-red-200 text-sm">
+                                {error}
+                            </div>
+                        )}
+
+                        {/* Results */}
+                        {generatedDocs && (
+                            <div className="mt-6 bg-green-50 border border-green-200 rounded-xl p-6">
+                                <div className="text-center mb-6">
+                                    <div className="inline-flex items-center justify-center w-12 h-12 rounded-full bg-green-100 text-green-600 mb-3">
+                                        <IconCheck />
+                                    </div>
+                                    <h2 className="text-xl font-bold text-gray-800">Processing Complete!</h2>
+                                    <p className="text-gray-600 mt-1">
+                                        Your {generatedDocs.originalPages} pages were formatted into {generatedDocs.sheetCount} sheets (final count: {generatedDocs.finalPages} pages).
+                                    </p>
+                                </div>
+
+                                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                                    <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-200">
+                                        <span className="text-xs font-bold text-blue-600 uppercase tracking-wide">Step 1</span>
+                                        <h3 className="text-lg font-semibold text-gray-800 mt-1">Front Pages</h3>
+                                        <p className="text-sm text-gray-500 mb-4 h-10">
+                                            Print this file first on one side of the paper.
+                                        </p>
+                                        <a 
+                                            href={generatedDocs.frontsUrl} 
+                                            download="1_Front_Side.pdf"
+                                            className="block w-full text-center bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 rounded transition-colors flex items-center justify-center"
+                                        >
+                                            <IconDownload /> Download Fronts
+                                        </a>
+                                    </div>
+
+                                    <div className="bg-white p-5 rounded-lg shadow-sm border border-gray-200">
+                                        <span className="text-xs font-bold text-purple-600 uppercase tracking-wide">Step 2</span>
+                                        <h3 className="text-lg font-semibold text-gray-800 mt-1">Back Pages</h3>
+                                        <p className="text-sm text-gray-500 mb-4 h-10">
+                                            Flip your printed stack, put it back in the tray, and print this file.
+                                        </p>
+                                        <a 
+                                            href={generatedDocs.backsUrl} 
+                                            download="2_Back_Side.pdf"
+                                            className="block w-full text-center bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 rounded transition-colors flex items-center justify-center"
+                                        >
+                                            <IconDownload /> Download Backs
+                                        </a>
+                                    </div>
+                                </div>
+
+                                <div className="mt-6 border-t border-green-200 pt-4">
+                                    <h4 className="font-semibold text-gray-700 mb-2 flex items-center">
+                                        <IconPrinter />
+                                        Printing Instructions
+                                    </h4>
+                                    <ol className="list-decimal list-inside text-sm text-gray-600 space-y-1 ml-1">
+                                        <li>Download both files.</li>
+                                        <li>Print <strong>1_Front_Side.pdf</strong> first.</li>
+                                        <li>Take the printed stack out. Do not reshuffle the pages.</li>
+                                        <li>Flip the entire stack over (usually on the long edge) and place it back in the input tray.</li>
+                                        <li>Print <strong>2_Back_Side.pdf</strong>.</li>
+                                        <li>Fold the stack in half to create your booklet.</li>
+                                    </ol>
+                                </div>
+
+                                <div className="mt-6 text-center">
+                                    <button 
+                                        onClick={() => {
+                                            setFiles([]);
+                                            setGeneratedDocs(null);
+                                        }}
+                                        className="text-sm text-gray-500 hover:text-gray-800 underline"
+                                    >
+                                        Start Over
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+
+                <div className="mt-8 text-center text-xs text-gray-400">
+                    <p>Processed locally in your browser. No files are uploaded to any server.</p>
+                </div>
+            </div>
+        );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+</script>
+
+</body>
+</html>
